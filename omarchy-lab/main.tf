@@ -52,8 +52,8 @@ resource "proxmox_virtual_environment_vm" "omarchy" {
     datastore_id = var.vm_storage
     interface    = "scsi0"
 
-    size    = 30
-    discard = "on"
+    size     = 30
+    discard  = "on"
     iothread = true
   }
 
@@ -98,7 +98,7 @@ resource "proxmox_virtual_environment_vm" "omarchy" {
   }
 
   started         = true
-  on_boot         = false  # Intentional: see README for rationale (Level 1 — manual install)
+  on_boot         = false # Intentional: see README for rationale (Level 1 — manual install)
   stop_on_destroy = true
 
   lifecycle {
