@@ -1,6 +1,6 @@
 # Omarchy Lab — Infrastructure-as-Code for a Proxmox Homelab
 
-Provisions an [Omarchy](https://omarchy.org/) virtual machine on Proxmox VE using OpenTofu (or Terraform). This is the first lab in a multi-phase DevOps portfolio.
+Provisions virtual machines on Proxmox VE using OpenTofu (or Terraform). The homelab currently runs **two VMs** — `omarchy-lab` (VM 100) and `ubuntu-lab` (VM 101) — both created by the same reusable `proxmox-vm` module via a `for_each` map. This is the first lab in a multi-phase DevOps portfolio.
 
 ---
 
@@ -15,7 +15,7 @@ Infrastructure-as-Code (IaC) means describing your servers, networks, and servic
 - **Idempotency**: running `tofu apply` twice does nothing the second time — the desired state is already matched.
 - **Learning**: this homelab is a sandbox. Break things, destroy, rebuild — the code is the source of truth, not the running VM.
 
-This project is the **Level 1** starting point: a single VM managed by IaC, with manual installation steps. Each subsequent level adds automation (CI/CD pipelines, multi-VM fleets).
+This project started at the **Level 1** point: a single VM managed by IaC, with manual installation steps. The **N4 refactor** took it further — the module is now driven by `for_each` and provisions **two VMs** from one `locals` map. Each subsequent level adds automation (CI/CD pipelines, larger fleets).
 
 ---
 
@@ -26,7 +26,7 @@ The repository is split into two layers:
 ```
 omarchy-lab/
 ├── environments/homelab/     ← concrete values for THIS homelab
-│   ├── main.tf               ← calls the module with real values
+│   ├── main.tf               ← VM map + single module call (for_each)
 │   ├── provider.tf           ← Proxmox provider config
 │   ├── variables.tf          ← environment-level inputs
 │   ├── versions.tf           ← pinned provider version
@@ -43,6 +43,8 @@ omarchy-lab/
 **Environments** define *where* and *how big*: "on node `trastero01`, 4 cores, 8 GB, ISO at `HDD01:iso/...`". They call a module and fill in the blanks.
 
 This separation means the same module could power a staging VM, a production VM, or a dozen VMs across a cluster — each environment just passes different values.
+
+**Multi-VM pattern (N4)**: `environments/homelab/main.tf` declares a `locals.virtual_machines` map — one entry per VM (VM 100 `omarchy-lab`, VM 101 `ubuntu-lab`). The module is called exactly once with `for_each = local.virtual_machines`, so adding a third VM is one more map entry. The module stays untouched.
 
 ---
 
@@ -72,7 +74,7 @@ If the state file is out of sync with reality (e.g. someone deleted the VM in th
 ## 4. Prerequisites
 
 1. **Proxmox VE** running on the target node (tested with Proxmox 9.x)
-2. **Omarchy ISO** uploaded to the Proxmox datastore (`HDD01:iso/omarchy-4.0.3.iso`)
+2. **Install ISOs** uploaded to the Proxmox datastore as needed (e.g. `HDD01:iso/ubuntu-26.04.1-desktop-amd64.iso` for `ubuntu-lab`)
 3. **Proxmox API token** with sufficient privileges to create VMs
    - Recommended: create a dedicated user (e.g. `opentofu@pve`) with `PVEVMAdmin` role on `/vms`
    - Generate an API token under **Datacenter → Permissions → API Tokens**
@@ -123,7 +125,7 @@ Executes the plan from `tofu plan`. Asks for confirmation, then creates/modifies
 tofu apply
 ```
 
-After the VM is created, open the **Proxmox console** to complete the Omarchy installation interactively (see Section 7).
+After each VM is created, open the **Proxmox console** to complete its installation interactively (see Section 7).
 
 ### 6.4 State Management Commands
 
@@ -131,27 +133,31 @@ After the VM is created, open the **Proxmox console** to complete the Omarchy in
 # List all resources Terraform knows about
 tofu state list
 
-# Show details of a specific resource
-tofu state show module.omarchy.proxmox_virtual_environment_vm.vm
+# Show details of a specific resource (for_each module address)
+tofu state show 'module.vm["omarchy"].proxmox_virtual_environment_vm.vm'
+tofu state show 'module.vm["ubuntu"].proxmox_virtual_environment_vm.vm'
 
 # Move a resource in state (used when refactoring — NOT what we did here)
 tofu state mv <old_address> <new_address>
 ```
 
-In this project, the VM resource was moved from the old flat address `proxmox_virtual_environment_vm.omarchy` to the current module address `module.omarchy.proxmox_virtual_environment_vm.vm` using `tofu state mv`.
+In this project, the VM resource was moved from the old flat address `proxmox_virtual_environment_vm.omarchy` into the module using `tofu state mv`. After the N4 `for_each` refactor the module addresses are `module.vm["omarchy"].proxmox_virtual_environment_vm.vm` and `module.vm["ubuntu"].proxmox_virtual_environment_vm.vm`.
 
 ---
 
 ## 7. Post-Install: No Boot Order Fix Needed
 
-Historically, the Omarchy ISO booted once from the cdrom attached on `ide2`. After installation the ISO was removed from the VM (a documented post-install step), so nothing remains to boot from.
+Neither VM needs a boot-order fix after install:
 
-Today, **no cdrom is attached**:
+- **`omarchy-lab` (100)**: its ISO booted once from the cdrom on `ide2`; after installation the media was removed (a documented post-install step), so no optical device remains.
+- **`ubuntu-lab` (101)**: its install ISO is still attached on `ide2` (`HDD01:iso/ubuntu-26.04.1-desktop-amd64.iso`) so it can boot the installer on first start.
 
-- The module attaches the install media *only while `iso` is set*, via a dynamic block (`dynamic "cdrom" { for_each = var.iso != null ? [1] : [] }`).
-- The environment leaves `iso` unset, so the cdrom block renders nothing and the VM has no optical drive at all.
+How the module decides:
 
-The `boot_order` still lists `[scsi0, ide2]`, but `ide2` is vacant (no device). The VM boots from `scsi0` (the disk) first, so **no manual fix is needed anymore**. Optionally, trimming `boot_order` to `[scsi0]` is a cosmetic cleanup for a future change.
+- The module attaches install media *only while `iso` is set*, via a dynamic block (`dynamic "cdrom" { for_each = var.iso != null ? [1] : [] }`).
+- The environment passes `iso = try(each.value.iso, null)`: entries without an `iso` key evaluate to `null`, so the cdrom block renders nothing. This is how `omarchy-lab` has no cdrom while `ubuntu-lab` does.
+
+`boot_order` still lists `[scsi0, ide2]`; every VM boots from `scsi0` (the disk) first, so **no manual fix is needed**. For `omarchy-lab`, `ide2` is vacant; trimming its `boot_order` to `[scsi0]` is a cosmetic cleanup for a future change.
 
 Note: unattended/cloud-init installs were **evaluated and deliberately not planned** — manual installation remains the approach (roadmap item N2 was dropped).
 
@@ -159,7 +165,7 @@ Note: unattended/cloud-init installs were **evaluated and deliberately not plann
 
 ## 8. Why `on_boot = false`
 
-The VM has `on_boot = false` intentionally. At this stage (Level 1), the VM is manually installed and not yet production-ready. This prevents the VM from automatically starting on Proxmox host reboot, which is appropriate for a lab environment where the VM may need post-install configuration before it can boot reliably.
+Both VMs have `on_boot = false` intentionally (the module default). At this stage (Level 1), the VMs are manually installed and not yet production-ready. This prevents them from automatically starting on Proxmox host reboot, which is appropriate for a lab environment where a VM may need post-install configuration before it can boot reliably.
 
 ---
 
@@ -178,7 +184,7 @@ When switching to OpenTofu is needed (e.g., to use state encryption or other Ope
 
 ## 10. VM ID
 
-The default `vm_id` is `100` (set in `terraform.tfvars`). This aligns with the Proxmox convention of using low numbers for manually/importantly managed VMs. The `variables.tf` default also matches at `100`.
+VM IDs are declared per VM in the `locals.virtual_machines` map in `environments/homelab/main.tf`: `omarchy-lab` is **100** and `ubuntu-lab` is **101**. They align with the Proxmox convention of using low numbers for manually/importantly managed VMs. Every VM carries its own explicit `vm_id` in its map entry.
 
 ---
 
@@ -190,6 +196,8 @@ The default `vm_id` is `100` (set in `terraform.tfvars`). This aligns with the P
 | **2** | Cloud-init (cidata) | **Dropped** — evaluated and deliberately not planned (roadmap item N2); installs stay manual |
 | **3** | CI/CD pipeline | Push to `main` triggers automated plan + apply (GitHub Actions, GitLab CI) |
 | **4** | Modular fleets | Multiple modules (VMs, VLANs, DNS, storage) orchestrated as a stack |
+
+This roadmap is forward-looking; the repo today already exercises Level 1 plus the **multi-VM `for_each` pattern (N4)** — two VMs from one `locals` map, one module call (see Section 2).
 
 ---
 
@@ -215,12 +223,29 @@ Set `insecure = true` in `terraform.tfvars` (already the default for this enviro
 
 ### State is out of sync (VM exists but plan wants to create it)
 
-The state file doesn't know about the VM. Import it:
+The state file doesn't know about the VM. Import it (note the `for_each` module address):
 
 ```bash
-tofu import module.omarchy.proxmox_virtual_environment_vm.vm <node_name>/<vm_id>
-# e.g. tofu import module.omarchy.proxmox_virtual_environment_vm.vm trastero01/100
+tofu import 'module.vm["omarchy"].proxmox_virtual_environment_vm.vm' trastero01/100
+tofu import 'module.vm["ubuntu"].proxmox_virtual_environment_vm.vm'  trastero01/101
 ```
+
+### The 'host_cdrom' block driver requires a file name (VM won't start after removing install media)
+
+If install media is removed but Proxmox keeps an **empty** cdrom device, QEMU fails to start the VM with `The 'host_cdrom' block driver requires a file name`. Proxmox shows the leftover as `ide3: cdrom,media=cdrom` — an empty optical drive with no media.
+
+Fix — delete the empty ide device, then start the VM:
+
+```bash
+# Proxmox API (authenticate with a PVEAPIToken)
+curl -X PUT \
+  -H "Authorization: PVEAPIToken=opentofu@pve!<token-id>=<secret>" \
+  'https://192.168.8.2:8006/api2/json/nodes/<node>/qemu/<vmid>/config?delete=ide3'
+```
+
+Or remove it in the Proxmox UI (Hardware tab → the cdrom device → Remove), then start the VM.
+
+Best practice: when you are done with install media, remove the cdrom device entirely — empty drives cause this start failure. In this repo the module never creates a cdrom unless `iso` is set, so the clean way to drop media is to remove the `iso` key from the VM's `locals` entry and apply.
 
 ### `terraform.tfvars` changes are not picked up
 
@@ -232,7 +257,7 @@ Run `tofu refresh` (or just `tofu plan`) — variables are re-read on every plan
 
 | File | Purpose |
 |------|---------|
-| `environments/homelab/main.tf` | Calls the module with concrete homelab values |
+| `environments/homelab/main.tf` | `locals.virtual_machines` map (one entry per VM) + single module call with `for_each` |
 | `environments/homelab/provider.tf` | Proxmox provider configuration (endpoint, TLS) |
 | `environments/homelab/variables.tf` | Environment-level input variable declarations |
 | `environments/homelab/versions.tf` | OpenTofu version + exact provider pin |
