@@ -5,34 +5,45 @@
 #          abstract module and the physical homelab.
 # =============================================================================
 
-module "omarchy" {
+locals {
+  virtual_machines = {
+    omarchy = {
+      vm_id = 100
+      name = "omarchy-lab"
+      description = "Omarchy workstation"
+      tags = ["opentofu", "omarchy", "lab"]
+      cpu_cores = 4
+      memory = 8192
+      disk_size = 30
+      iso = "HDD01:iso/omarchy-4.0.3.iso"
+    }
 
-  source = "../../modules/proxmox-vm"
+    ubuntu = {
+      vm_id = 101
+      name = "ubuntu-lab"
+      description = "Ubuntu workstation"
+      tags = ["opentofu", "ubuntu", "lab"]
+      cpu_cores = 4
+      memory = 8192
+      disk_size = 20
+      iso = "HDD01:iso/ubuntu-26.04.1-desktop-amd64.iso"
+    }
+  }
+}
 
-  name        = "omarchy-lab"
-  description = "Omarchy workstation"
-  tags        = ["opentofu", "omarchy", "lab"]
-
-  # Real Proxmox node name — must match `pve` node hostname in your cluster.
+module "vm" {
+  for_each = local.virtual_machines
+  source = "../../modules/proxmox-vm" #where the template is
+  name = each.value.name
+  description = each.value.description
+  tags = each.value.tags
+  vm_id = each.value.vm_id
   node_name = "trastero01"
-  # VM ID 100: matches the existing manually-created VM in Proxmox so the
-  # state can be imported without creating a duplicate.
-  vm_id     = 100
-
-  # 4 cores, 8 GB RAM — sized for an interactive desktop/workstation.
-  cpu_cores = 4
-  memory    = 8192
-
-  # 30 GB thin-provisioned disk. The plan may show growth to 60 GB in a
-  # future iteration — 30 GB matches the current real VM.
-  disk_size = 30
-  storage   = "local-lvm"
-
+  cpu_cores = each.value.cpu_cores
+  memory = each.value.memory
+  disk_size = each.value.disk_size
+  iso = each.value.iso
+  storage = "local-lvm" 
   bridge = "vmbr0"
-
-  # iso intentionally omitted: the install media was removed from the VM
-  # after installation (documented post-install step). The module only
-  # attaches a cdrom when iso is set; the ISO itself still lives on HDD01.
-
   started = true
 }
