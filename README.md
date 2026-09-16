@@ -15,7 +15,7 @@ Infrastructure-as-Code (IaC) means describing your servers, networks, and servic
 - **Idempotency**: running `tofu apply` twice does nothing the second time — the desired state is already matched.
 - **Learning**: this homelab is a sandbox. Break things, destroy, rebuild — the code is the source of truth, not the running VM.
 
-This project is the **Level 1** starting point: a single VM managed by IaC, with manual installation steps. Each subsequent level adds automation (cloud-init, CI/CD pipelines, multi-VM fleets).
+This project is the **Level 1** starting point: a single VM managed by IaC, with manual installation steps. Each subsequent level adds automation (CI/CD pipelines, multi-VM fleets).
 
 ---
 
@@ -142,18 +142,18 @@ In this project, the VM resource was moved from the old flat address `proxmox_vi
 
 ---
 
-## 7. Post-Install: Boot Order Fix
+## 7. Post-Install: No Boot Order Fix Needed
 
-After the ISO installation completes, the VM will attempt to boot from the cdrom again (since `ide2` is still in the boot order). This is **expected behavior** at this stage (Level 1 — manual install).
+Historically, the Omarchy ISO booted once from the cdrom attached on `ide2`. After installation the ISO was removed from the VM (a documented post-install step), so nothing remains to boot from.
 
-To fix the boot order after installation:
+Today, **no cdrom is attached**:
 
-1. Shut down the VM from the Proxmox console
-2. In the Proxmox UI, go to **VM → Options → Boot Order**
-3. Disable `ide2` or remove it from the boot sequence
-4. Start the VM
+- The module attaches the install media *only while `iso` is set*, via a dynamic block (`dynamic "cdrom" { for_each = var.iso != null ? [1] : [] }`).
+- The environment leaves `iso` unset, so the cdrom block renders nothing and the VM has no optical drive at all.
 
-A future iteration (Level 2+) will handle this automatically with cloud-init/cidata.
+The `boot_order` still lists `[scsi0, ide2]`, but `ide2` is vacant (no device). The VM boots from `scsi0` (the disk) first, so **no manual fix is needed anymore**. Optionally, trimming `boot_order` to `[scsi0]` is a cosmetic cleanup for a future change.
+
+Note: unattended/cloud-init installs were **evaluated and deliberately not planned** — manual installation remains the approach (roadmap item N2 was dropped).
 
 ---
 
@@ -187,7 +187,7 @@ The default `vm_id` is `100` (set in `terraform.tfvars`). This aligns with the P
 | Level | Name | What changes |
 |-------|------|-------------|
 | **1** ← current | Manual install | VM created via IaC, but OS installed interactively from ISO |
-| **2** | Cloud-init (cidata) | Unattended install via `qm set --ide2 ...` cloud-init drive |
+| **2** | Cloud-init (cidata) | **Dropped** — evaluated and deliberately not planned (roadmap item N2); installs stay manual |
 | **3** | CI/CD pipeline | Push to `main` triggers automated plan + apply (GitHub Actions, GitLab CI) |
 | **4** | Modular fleets | Multiple modules (VMs, VLANs, DNS, storage) orchestrated as a stack |
 
