@@ -253,7 +253,7 @@ Run `tofu refresh` (or just `tofu plan`) — variables are re-read on every plan
 
 ### S3 remote backend errors (`Error configuring S3 backend`, `Access Denied`)
 
-The backend is an S3-compatible endpoint (SeaweedFS on LXC 200 at `192.168.8.37:9000`). Credentials are **not** in any file — they come from environment variables:
+The backend is an S3-compatible endpoint (SeaweedFS on LXC 200 at `192.168.8.101:9000`). Credentials are **not** in any file — they come from environment variables:
 
 ```bash
 export AWS_ACCESS_KEY_ID="<your-key>"
