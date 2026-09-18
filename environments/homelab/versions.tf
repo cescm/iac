@@ -19,4 +19,19 @@ terraform {
       version = "= 0.111.1"
     }
   }
+
+  # N5 — Remote state backend (SeaweedFS S3, LXC 200 minio/seaweedfs).
+  # State no longer lives on the Proxmox host: it is stored in the
+  # homelab-tfstate bucket on 192.168.8.37:9000. Credentials come from
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars — never commit them.
+  backend "s3" {
+    bucket                      = "homelab-tfstate"
+    key                         = "homelab/terraform.tfstate"
+    region                      = "us-east-1"
+    endpoint                    = "http://192.168.8.37:9000"
+    use_path_style              = true
+    skip_region_validation      = true
+    skip_credentials_validation = true
+    skip_requesting_account_id  = true
+  }
 }
