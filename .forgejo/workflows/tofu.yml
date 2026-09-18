@@ -1,0 +1,80 @@
+# =============================================================================
+# Forgejo Actions — OpenTofu lifecycle for environments/homelab
+#
+#  Two events, one file (drift-safe, no duplicated YAML):
+#    pull_request        -> plan  (read-only; no S3 write, no Proxmox side-effect)
+#    push to main        -> apply (writes remote state @ SeaweedFS .101:9000
+#                                  and creates/changes VMs via the bpg/proxmox provider)
+#
+#  Credentials come ONLY from Forgejo repo secrets — never from this file,
+#  never from the remote URL, never from vars. Values are injected by the
+#  runner into the tofu step's env and never persisted/committed.
+#
+#  NOTE (honest): this container image does NOT have the `rtk` wrapper the
+#  homelab shell uses; it installs the plain OpenTofu binary instead. The
+#  static S3 backend endpoint is already pinned in versions.tf (192.168.8.101),
+#  so no endpoint override is needed here.
+# =============================================================================
+
+name: tofu
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  # remote-state backend at the STATIC SeaweedFS IP (already in versions.tf)
+  AWS_ENDPOINT_URL_S3: http://192.168.8.101:9000
+  AWS_S3_FORCE_PATH_STYLE: "true"
+
+jobs:
+  tofu:
+    runs-on: docker
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install OpenTofu (plain binary; rtk not present in CI)
+        run: |
+          set -eux
+          T=opentofu_1.12.6_amd64.tar.gz
+          curl -fsSLo "$T" \
+            "https://github.com/opentofu/opentofu/releases/download/v1.12.6/$T"
+          curl -fsSLo "$T.sha256" "$T.sha256"
+          ( cd / && sha256sum -c /dev/stdin ) <<EOF
+          $(cat "$T.sha256")
+          EOF
+          tar -xzf "$T" opentofu
+          install -m 0755 opentofu /usr/local/bin/tofu
+          tofu version
+
+      - name: init (remote S3 state @ static .101)
+        run: tofu init -backend=false
+        working-directory: environments/homelab
+
+      # --- plan on PR: read-only, proves remote state + provider auth, no apply ---
+      - name: plan (pull request)
+        if: github.event_name == 'pull_request'
+        working-directory: environments/homelab
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          PM_API_TOKEN_ID: ${{ secrets.PM_API_TOKEN_ID }}
+          PM_API_TOKEN_SECRET: ${{ secrets.PM_API_TOKEN_SECRET }}
+        run: |
+          tofu plan -no-color -out=tf.plan
+          echo "Forgejo issue comment is out of scope here; plan artifact kept for logs"
+
+      # --- apply on merge to main: full write --------------------------------------------------
+      - name: apply (main)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        working-directory: environments/homelab
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          PM_API_TOKEN_ID: ${{ secrets.PM_API_TOKEN_ID }}
+          PM_API_TOKEN_SECRET: ${{ secrets.PM_API_TOKEN_SECRET }}
+        run: |
+          tofu plan -no-color -out=tf.plan
+          tofu apply -no-color -auto-approve tf.plan
