@@ -28,7 +28,7 @@ terraform {
     bucket                      = "homelab-tfstate"
     key                         = "homelab/terraform.tfstate"
     region                      = "us-east-1"
-    endpoint                    = "http://192.168.8.37:9000"
+    endpoint                    = "http://192.168.8.101:9000"
     use_path_style              = true
     skip_region_validation      = true
     skip_credentials_validation = true
