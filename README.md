@@ -285,3 +285,46 @@ This copies the local `terraform.tfstate` into the remote S3 bucket (`homelab-tf
 | `modules/proxmox-vm/outputs.tf` | Values exported by the module (vm_id, vm_name) |
 | `modules/proxmox-vm/versions.tf` | Provider source declaration (no version pin) |
 | `.gitignore` | Excludes state, caches, secrets; tracks `terraform.tfvars` |
+
+---
+
+## 14. Deploying a Single Machine (`-target`) vs. One Folder Per Machine
+
+All machines in this environment come from **one** declaration:
+
+```hcl
+# environments/homelab/main.tf
+module "vm" {
+  source   = "../../modules/proxmox-vm"
+  for_each = local.virtual_machines   # 🔑 the whole farm in one map
+  ...
+}
+```
+
+Because the module uses `for_each`, every machine is a **module instance** named `module.vm["<name>"]` — so "just one machine" is a **`-target`**, not a new directory:
+
+```bash
+# plan + apply ONE machine only (e.g. omarchy) — the rest of the map is untouched
+tofu plan  -target='module.vm["omarchy"]'
+tofu apply -target='module.vm["omarchy"]'
+
+# both machines, straight from the map — the normal full run
+tofu apply
+```
+
+Current machine names (keys of `local.virtual_machines`): **`omarchy`**, **`ubuntu`**.
+
+### Why `-target` and not a folder per machine?
+
+Both are legit; this repo deliberately uses `-target` **for now**. The honest tradeoff:
+
+| | `-target` on the map (current) | One folder per machine |
+|---|---|---|
+| Where machines live | inside `for_each` map in one `main.tf` | `environments/homelab/<machine>/` each with own `main.tf` |
+| State/backend | **one** state (same SeaweedFS key `homelab/terraform.tfstate`) | **N** state keys (one per machine dir) |
+| Deploy one | `tofu apply -target='module.vm["…"]'` | `cd <machine> && tofu apply` |
+| CI matrix | single job (loop `-target` per VM) | **native** matrix — one job per dir, parallel |
+| Cross-machine refs | easy (same state graph) | needs `terraform_remote_state` data sources |
+| Boilerplate | minimal (one provider/backend) | repeated per dir (provider, backend, versions) |
+
+**Decision (recorded):** stay on the single map + `-target` **until either** (a) a machine's lifecycle drifts far from the rest (e.g. a k3s worker that rebuils weekly while `ubuntu` stays evergreen), **or** (b) you want parallel per-machine CI jobs. The moment the README's own history shows "rebuilt one VM without touching the others" more than once, do **not** keep stacking `-target` — split that machine into `environments/homelab/<machine>/` with its own backend key + a matrix job in CI. That split is a one-afternoon refactor, fully documented here, so it's a *planned* evolution, not a surprise.
