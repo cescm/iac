@@ -29,7 +29,7 @@ omarchy-lab/
 │   ├── main.tf               ← VM map + single module call (for_each)
 │   ├── provider.tf           ← Proxmox provider config
 │   ├── variables.tf          ← environment-level inputs
-│   ├── versions.tf           ← pinned provider version
+│   ├── versions.tf           ← pinned provider version + S3 remote backend (N5)
 │   └── terraform.tfvars      ← non-secret variable values
 └── modules/proxmox-vm/       ← reusable, environment-agnostic module
     ├── main.tf               ← VM resource definition
@@ -55,7 +55,7 @@ When you work with Terraform/OpenTofu, there are three distinct worlds:
 | World | What it is | Where it lives |
 |-------|-----------|----------------|
 | **Configuration files** | Your desired state — the `.tf` files you edit | This repository |
-| **State** | Terraform's record of what it *thinks* is real | `terraform.tfstate` (local file) |
+| **State** | Terraform's record of what it *thinks* is real | Remote S3-compatible backend (SeaweedFS on LXC 200) |
 | **Real infrastructure** | The actual VMs, disks, and networks in Proxmox | Your Proxmox cluster |
 
 **Terraform manages the state, not the files.** When you run `tofu plan`, it:
@@ -92,7 +92,7 @@ export PROXMOX_VE_API_TOKEN="opentofu@pve!tokenid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxx
 export PROXMOX_VE_USERNAME="opentofu@pve"
 ```
 
-> **Security note**: The API token value is never committed to this repository. The `.gitignore` excludes `*.tfvars` except `terraform.tfvars` (which contains only the non-secret endpoint URL).
+> **Security note**: The API token value is never committed to this repository. The `.gitignore` excludes `*.tfvars` except `terraform.tfvars` (which contains only the non-secret endpoint URL). The S3 backend credentials (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) are likewise set as environment variables and never committed.
 
 > **Bash gotcha**: If you paste the export lines inside double quotes (`"..."`), the `!` character triggers **history expansion** in bash and the command silently expands to garbage. Always use single quotes (`'...'`) or run the exports in a non-interactive context.
 
@@ -102,7 +102,7 @@ export PROXMOX_VE_USERNAME="opentofu@pve"
 
 ### 6.1 `tofu init`
 
-Downloads the provider plugin (bpg/proxmox 0.111.1) and initializes the working directory. Run once per environment, or after adding/removing providers.
+Downloads the provider plugin (bpg/proxmox 0.111.1) and initializes the working directory. Run once per environment, or after adding/removing providers. With the remote backend (N5), also ensure `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are set — `tofu init` will connect to the S3 endpoint.
 
 ```bash
 cd environments/homelab
@@ -197,7 +197,7 @@ VM IDs are declared per VM in the `locals.virtual_machines` map in `environments
 | **3** | CI/CD pipeline | Push to `main` triggers automated plan + apply (GitHub Actions, GitLab CI) |
 | **4** | Modular fleets | Multiple modules (VMs, VLANs, DNS, storage) orchestrated as a stack |
 
-This roadmap is forward-looking; the repo today already exercises Level 1 plus the **multi-VM `for_each` pattern (N4)** — two VMs from one `locals` map, one module call (see Section 2).
+This roadmap is forward-looking; the repo today already exercises Level 1 plus the **multi-VM `for_each` pattern (N4)** — two VMs from one `locals` map, one module call (see Section 2). **N5 (remote state)** is also complete: state now lives in an S3-compatible backend (SeaweedFS) instead of a local file.
 
 ---
 
@@ -251,6 +251,24 @@ Best practice: when you are done with install media, remove the cdrom device ent
 
 Run `tofu refresh` (or just `tofu plan`) — variables are re-read on every plan/apply.
 
+### S3 remote backend errors (`Error configuring S3 backend`, `Access Denied`)
+
+The backend is an S3-compatible endpoint (SeaweedFS on LXC 200 at `192.168.8.37:9000`). Credentials are **not** in any file — they come from environment variables:
+
+```bash
+export AWS_ACCESS_KEY_ID="<your-key>"
+export AWS_SECRET_ACCESS_KEY="<your-secret>"
+```
+
+**Never commit these values.** After setting them, re-initialize:
+
+```bash
+cd environments/homelab
+tofu init -migrate-state -force-copy
+```
+
+This copies the local `terraform.tfstate` into the remote S3 bucket (`homelab-tfstate`, key `homelab/terraform.tfstate`) and switches all subsequent operations to the remote backend.
+
 ---
 
 ## 13. Files
@@ -260,7 +278,7 @@ Run `tofu refresh` (or just `tofu plan`) — variables are re-read on every plan
 | `environments/homelab/main.tf` | `locals.virtual_machines` map (one entry per VM) + single module call with `for_each` |
 | `environments/homelab/provider.tf` | Proxmox provider configuration (endpoint, TLS) |
 | `environments/homelab/variables.tf` | Environment-level input variable declarations |
-| `environments/homelab/versions.tf` | OpenTofu version + exact provider pin |
+| `environments/homelab/versions.tf` | OpenTofu version + exact provider pin + S3 remote backend config (SeaweedFS) |
 | `environments/homelab/terraform.tfvars` | Non-secret variable values (endpoint URL) |
 | `modules/proxmox-vm/main.tf` | VM resource definition (the reusable module) |
 | `modules/proxmox-vm/variables.tf` | Module input variable declarations |
