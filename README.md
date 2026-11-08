@@ -460,6 +460,14 @@ The disk controller is VirtIO SCSI (as requested), and Windows Setup ships **no 
 >
 > This happened on the first install of VM 102; the provider does not re-add it on later applies. See Section 12 troubleshooting.
 
+### Network
+
+The guest lives at **`192.168.8.150`** on `vmbr0`. Its MAC is fixed by the module (`BC:24:11:E6:DD:E6`), so the address stays with the VM across rebuilds as long as the reservation or static configuration is kept.
+
+Windows Firewall drops ICMP by default: the host does **not** answer `ping`, but it is reachable (RDP on `3389` is open).
+
+OpenTofu cannot set a Windows guest IP — the provider only injects network configuration through cloud-init, which Windows does not support. The address is therefore assigned inside the guest or reserved by MAC on the router, not in this repo.
+
 ### Ansible
 
 The `ansible` repo does **not** manage this guest. Its playbook targets Linux over SSH; a Windows guest needs WinRM and a separate Windows playbook. Until that exists, `windows11-lab` is provisioned by OpenTofu only and configured manually. See `ansible/README.md`.
