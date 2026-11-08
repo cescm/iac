@@ -67,7 +67,9 @@ locals {
       boot_order = ["ide2", "scsi0"]
       # The virtio-win driver ISO cannot be a second cdrom (provider limit).
       # Attach it after apply, before first boot:
-      #   qm set 102 -ide0 HDD01:iso/virtio-win.iso,media=cdrom
+      #   qm set 102 -ide0 HDD01:iso/virtio-win-0.1.302.iso,media=cdrom
+      # Created stopped so the driver ISO can be attached before Setup runs.
+      started = false
     }
   }
 }
@@ -97,5 +99,7 @@ module "vm" {
   iso     = try(each.value.iso, null)
   storage = "local-lvm"
   bridge  = "vmbr0"
-  started = true
+  # Per-VM start control: Windows is created stopped so the virtio-win driver
+  # ISO can be attached before the first boot; Linux VMs default to started.
+  started = try(each.value.started, true)
 }

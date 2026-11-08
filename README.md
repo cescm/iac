@@ -430,12 +430,12 @@ The disk controller is VirtIO SCSI (as requested), and Windows Setup ships **no 
 **Provider limitation:** the legacy `proxmox_virtual_environment_vm` resource allows only **one** `cdrom` block (`MaxItems=1`), and `q35` only exposes `ide0`/`ide2`. So the driver ISO cannot be declared as a second CD-ROM in OpenTofu. The Windows installer ISO is the single declarative `cdrom`; the driver ISO is attached out-of-band:
 
 1. The ISO is already downloaded on the Proxmox host at
-   `/mnt/storage/isos/template/iso/virtio-win.iso` (= `HDD01:iso/virtio-win.iso`).
+   `/mnt/storage/isos/template/iso/virtio-win-0.1.302.iso` (= `HDD01:iso/virtio-win-0.1.302.iso`).
    Official source: `https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso`.
 2. After `tofu apply`, attach it to the (stopped) VM before first boot:
 
    ```bash
-   qm set 102 -ide0 HDD01:iso/virtio-win.iso,media=cdrom
+   qm set 102 -ide0 HDD01:iso/virtio-win-0.1.302.iso,media=cdrom
    ```
 
 3. Start the VM and run Setup.
