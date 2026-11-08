@@ -23,19 +23,30 @@ resource "proxmox_virtual_environment_vm" "vm" {
   # q35: modern PC chipset emulation with PCIe support (required for UEFI/OVMF).
   machine = "q35"
   # OVMF: UEFI firmware — enables modern boot, Secure Boot-ready but not enforced here.
-  bios    = "ovmf"
+  bios = "ovmf"
 
   efi_disk {
-    datastore_id      = var.storage
-    type              = "4m"
+    datastore_id = var.storage
+    type         = "4m"
     # Secure Boot not needed for this lab — no shim/kernel signing required.
     pre_enrolled_keys = false
   }
 
   # l26 = Linux 2.6+ kernel type — tells Proxmox the guest OS family for
-  # optimised virtio driver selection and paravirtualisation hints.
+  # optimised virtio driver selection and paravirtualisation hints. Windows
+  # guests use "win11" so QEMU applies the right paravirtualisation profile.
   operating_system {
-    type = "l26"
+    type = var.os_type
+  }
+
+  # Virtual TPM 2.0 state disk — required by Windows 11. Rendered only when
+  # tpm_enabled is true; Linux guests leave it out entirely.
+  dynamic "tpm_state" {
+    for_each = var.tpm_enabled ? [1] : []
+    content {
+      datastore_id = var.storage
+      version      = var.tpm_version
+    }
   }
 
   # --------------------------------------------------
@@ -47,7 +58,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
     sockets = 1
     # "host": passes through the physical CPU flags to the guest — best
     # performance for a lab where host and guest share the same architecture.
-    type    = "host"
+    type = "host"
   }
 
   # --------------------------------------------------
@@ -56,6 +67,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
 
   memory {
     dedicated = var.memory
+    # floating = minimum balloon memory. null disables ballooning entirely.
+    floating = var.memory_min
   }
 
   # --------------------------------------------------
@@ -70,10 +83,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
     datastore_id = var.storage
     interface    = "scsi0"
 
-    size     = var.disk_size
+    size = var.disk_size
     # discard = "on": enables TRIM/DISCARD on the block device — keeps the
     # underlying thin-provisioned storage efficient as files are deleted.
-    discard  = "on"
+    discard = "on"
     # iothread: dedicates a QEMU I/O thread to this disk — reduces latency
     # by preventing I/O from blocking the main VM vCPU thread.
     iothread = true
@@ -89,7 +102,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   # --------------------------------------------------
-  # Omarchy ISO
+  # Install media
   # --------------------------------------------------
 
   # Install ISO attached as a cdrom on the IDE bus ONLY while var.iso is set
@@ -104,12 +117,23 @@ resource "proxmox_virtual_environment_vm" "vm" {
     }
   }
 
+  # Secondary install media — typically the virtio-win driver ISO attached to a
+  # Windows guest so Setup can see the VirtIO disk and network adapters. On a
+  # separate IDE interface (ide0) so it coexists with the primary installer.
+  dynamic "cdrom" {
+    for_each = var.iso_secondary != null ? [1] : []
+    content {
+      file_id   = var.iso_secondary
+      interface = "ide0"
+    }
+  }
+
   # --------------------------------------------------
   # Display
   # --------------------------------------------------
 
   vga {
-    type = "virtio"
+    type = var.vga_type
   }
 
   # --------------------------------------------------
@@ -117,11 +141,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
   # --------------------------------------------------
 
   # Boot order: scsi0 first (disk — boots installed OS after install),
-  # ide2 second (ISO cdrom — used during initial Omarchy installation).
-  boot_order = [
-    "scsi0",
-    "ide2"
-  ]
+  # ide2 second (ISO cdrom — used during initial installation).
+  boot_order = var.boot_order
 
   # QEMU guest agent disabled: Omarchy may not ship qemu-guest-agent on the
   # live ISO. Enabling it before the agent is installed causes Proxmox to
@@ -130,10 +151,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
     enabled = var.qemu_agent
   }
 
-  started         = var.started
+  started = var.started
   # on_boot = false intentionally: Level 1 lab VM should not auto-start on
   # Proxmox host reboot — it may need manual intervention after install.
-  on_boot         = var.on_boot
+  on_boot = var.on_boot
   # Gracefully shut down the guest before destroying the resource in Proxmox.
   stop_on_destroy = true
 

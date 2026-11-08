@@ -40,6 +40,14 @@ variable "memory" {
   default = 4096
 }
 
+# Minimum RAM in MiB when memory ballooning is active (the "floating" memory).
+# Set to a value below var.memory to let the hypervisor reclaim unused guest
+# RAM; null disables ballooning (guest keeps all dedicated memory).
+variable "memory_min" {
+  type    = number
+  default = null
+}
+
 # Disk size in GB — thin-provisioned on supported storage backends.
 variable "disk_size" {
   type    = number
@@ -56,6 +64,46 @@ variable "storage" {
 variable "bridge" {
   type    = string
   default = "vmbr0"
+}
+
+# Guest OS family reported to Proxmox. Controls virtio driver selection and
+# paravirtualisation hints: "l26" for Linux 2.6+, "win11" for Windows 11.
+variable "os_type" {
+  type    = string
+  default = "l26"
+}
+
+# Enable a virtual TPM 2.0 state disk (required by Windows 11).
+variable "tpm_enabled" {
+  type    = bool
+  default = false
+}
+
+# TPM specification version — "v2.0" is required by Windows 11.
+variable "tpm_version" {
+  type    = string
+  default = "v2.0"
+}
+
+# Secondary install media (e.g. the virtio-win driver ISO for Windows guests),
+# attached as a second CD-ROM on ide0. null = no second CD-ROM.
+variable "iso_secondary" {
+  type    = string
+  default = null
+}
+
+# VGA adapter type. "virtio" for Linux guests; Windows has no virtio-gpu driver
+# during Setup, so use "std" to keep the installer display visible.
+variable "vga_type" {
+  type    = string
+  default = "virtio"
+}
+
+# Boot device order. The first entry is tried first; Proxmox falls through to
+# the next device when the current one is not bootable.
+variable "boot_order" {
+  type    = list(string)
+  default = ["scsi0", "ide2"]
 }
 
 # ISO file_id in Proxmox datastore format (e.g. "HDD01:iso/omarchy-4.0.3.iso").

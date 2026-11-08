@@ -84,17 +84,30 @@ If the state file is out of sync with reality (e.g. someone deleted the VM in th
 
 ## 5. Authentication
 
-Set the following environment variables **before** running OpenTofu/Terraform:
+Two independent credential sets are required. Both are supplied through **environment variables or local (untracked) files only** — never committed.
+
+### 5.1 Proxmox VE API token
 
 ```bash
-export PROXMOX_VE_ENDPOINT="https://192.168.8.2:8006/"
-export PROXMOX_VE_API_TOKEN="opentofu@pve!tokenid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export PROXMOX_VE_API_TOKEN='opentofu@pve!tofu=<token-secret-uuid>'
 export PROXMOX_VE_USERNAME="opentofu@pve"
 ```
 
-> **Security note**: The API token value is never committed to this repository. The `.gitignore` excludes `*.tfvars` except `terraform.tfvars` (which contains only the non-secret endpoint URL). The S3 backend credentials (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) are likewise set as environment variables and never committed.
+- **Token format is `USER@REALM!TOKENID=SECRET`.** All three parts are mandatory — the realm (`@pve`), the `!tokenid`, and `=secret`. Supplying only the secret UUID, or omitting the realm/tokenid, returns `401 Unauthorized`.
+- **Where to get it:** Proxmox UI → **Datacenter → Permissions → API Tokens** → *Add*. The secret is shown **once** at creation. The token's user needs the `PVEVMAdmin` role on `/vms` (e.g. user `opentofu@pve`).
+- **Bash gotcha:** in an interactive shell an unquoted `!` triggers **history expansion** and silently corrupts the value (`bash: !tokenid=…: event not found`). Always quote with **single quotes**.
 
-> **Bash gotcha**: If you paste the export lines inside double quotes (`"..."`), the `!` character triggers **history expansion** in bash and the command silently expands to garbage. Always use single quotes (`'...'`) or run the exports in a non-interactive context.
+### 5.2 SeaweedFS S3 (remote state) credentials
+
+```bash
+export AWS_ACCESS_KEY_ID="<key>"
+export AWS_SECRET_ACCESS_KEY="<secret>"
+```
+
+- **Where they come from:** the SeaweedFS server config on the container (`CT 200`, `192.168.8.101`) at `/etc/weed/s3.json`, identity `terraform`. Copy them from there into the process environment.
+- **Never commit these values.** They are not in any tracked file — the variable *names* are documented, the values are not.
+
+> The Proxmox **endpoint** is *not* an environment variable here. It is a required input set in `terraform.tfvars` (`proxmox_endpoint`) and consumed by `provider.tf` (`endpoint = var.proxmox_endpoint`). See Section 15 for the S3 backend and Section 16 for CI.
 
 ---
 
@@ -151,6 +164,7 @@ Neither VM needs a boot-order fix after install:
 
 - **`omarchy-lab` (100)**: its ISO booted once from the cdrom on `ide2`; after installation the media was removed (a documented post-install step), so no optical device remains.
 - **`ubuntu-lab` (101)**: its install ISO is still attached on `ide2` (`HDD01:iso/ubuntu-26.04.1-desktop-amd64.iso`) so it can boot the installer on first start.
+- **`windows11-lab` (102)**: boots the Windows 11 installer from `ide2` first (`boot_order = [ide2, scsi0]`) because the empty disk is not bootable yet. See Section 17 for the full Windows lifecycle.
 
 How the module decides:
 
@@ -184,7 +198,7 @@ When switching to OpenTofu is needed (e.g., to use state encryption or other Ope
 
 ## 10. VM ID
 
-VM IDs are declared per VM in the `locals.virtual_machines` map in `environments/homelab/main.tf`: `omarchy-lab` is **100** and `ubuntu-lab` is **101**. They align with the Proxmox convention of using low numbers for manually/importantly managed VMs. Every VM carries its own explicit `vm_id` in its map entry.
+VM IDs are declared per VM in the `locals.virtual_machines` map in `environments/homelab/main.tf`: `omarchy-lab` is **100**, `ubuntu-lab` is **101**, and `windows11-lab` is **102**. They align with the Proxmox convention of using low numbers for manually/importantly managed VMs. Every VM carries its own explicit `vm_id` in its map entry.
 
 ---
 
@@ -253,21 +267,22 @@ Run `tofu refresh` (or just `tofu plan`) — variables are re-read on every plan
 
 ### S3 remote backend errors (`Error configuring S3 backend`, `Access Denied`)
 
-The backend is an S3-compatible endpoint (SeaweedFS on LXC 200 at `192.168.8.101:9000`). Credentials are **not** in any file — they come from environment variables:
+The backend is the S3-compatible SeaweedFS endpoint on CT 200 (`192.168.8.101:9000`). Credentials come from environment variables only:
 
 ```bash
 export AWS_ACCESS_KEY_ID="<your-key>"
 export AWS_SECRET_ACCESS_KEY="<your-secret>"
 ```
 
-**Never commit these values.** After setting them, re-initialize:
+**Never commit these values.** Re-initialize after changing credentials or the endpoint:
 
 ```bash
 cd environments/homelab
-tofu init -migrate-state -force-copy
+tofu init -reconfigure                  # re-point / re-auth the existing backend
+# tofu init -migrate-state -force-copy  # only for the FIRST migration from local state
 ```
 
-This copies the local `terraform.tfstate` into the remote S3 bucket (`homelab-tfstate`, key `homelab/terraform.tfstate`) and switches all subsequent operations to the remote backend.
+If the credential variables are missing, the AWS SDK does **not** fail fast — it tries the EC2 metadata service (IMDS, `169.254.169.254`) and the resulting error is slow and misleading. If `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` are empty, the backend error is almost certainly this. See Section 15 for the full backend config.
 
 ---
 
@@ -279,12 +294,14 @@ This copies the local `terraform.tfstate` into the remote S3 bucket (`homelab-tf
 | `environments/homelab/provider.tf` | Proxmox provider configuration (endpoint, TLS) |
 | `environments/homelab/variables.tf` | Environment-level input variable declarations |
 | `environments/homelab/versions.tf` | OpenTofu version + exact provider pin + S3 remote backend config (SeaweedFS) |
-| `environments/homelab/terraform.tfvars` | Non-secret variable values (endpoint URL) |
+| `environments/homelab/terraform.tfvars` | Non-secret variable values (endpoint URL). **Untracked** — ignored by `.gitignore` (`*.tfvars`); supply locally, or via `-var` / `TF_VAR_`. |
 | `modules/proxmox-vm/main.tf` | VM resource definition (the reusable module) |
 | `modules/proxmox-vm/variables.tf` | Module input variable declarations |
 | `modules/proxmox-vm/outputs.tf` | Values exported by the module (vm_id, vm_name) |
 | `modules/proxmox-vm/versions.tf` | Provider source declaration (no version pin) |
-| `.gitignore` | Excludes state, caches, secrets; tracks `terraform.tfvars` |
+| `.forgejo/workflows/tofu.yml` | CI: `plan` on PR, `apply` on merge to `main` (see Section 16) |
+| `docs/` | Postmortems and the CI runbook |
+| `.gitignore` | Excludes state, caches, and all `*.tfvars` (including `terraform.tfvars`) |
 
 ---
 
@@ -328,3 +345,108 @@ Both are legit; this repo deliberately uses `-target` **for now**. The honest tr
 | Boilerplate | minimal (one provider/backend) | repeated per dir (provider, backend, versions) |
 
 **Decision (recorded):** stay on the single map + `-target` **until either** (a) a machine's lifecycle drifts far from the rest (e.g. a k3s worker that rebuils weekly while `ubuntu` stays evergreen), **or** (b) you want parallel per-machine CI jobs. The moment the README's own history shows "rebuilt one VM without touching the others" more than once, do **not** keep stacking `-target` — split that machine into `environments/homelab/<machine>/` with its own backend key + a matrix job in CI. That split is a one-afternoon refactor, fully documented here, so it's a *planned* evolution, not a surprise.
+
+---
+
+## 15. Remote State — SeaweedFS S3 Backend (N5)
+
+State is stored in an S3-compatible SeaweedFS endpoint — not on the Proxmox host and not in a local file.
+
+| Setting | Value |
+|---------|-------|
+| Bucket | `homelab-tfstate` |
+| Key | `homelab/terraform.tfstate` |
+| Endpoint | `http://192.168.8.101:9000` (CT 200, static IP) |
+| Region | `us-east-1` (placeholder; not validated) |
+| Path style | `use_path_style = true` |
+| Validation | `skip_region_validation`, `skip_credentials_validation`, `skip_requesting_account_id` all `true` |
+| Credentials | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars (Section 5.2) |
+
+The config lives in `environments/homelab/versions.tf` (the `backend "s3"` block). The endpoint is a **static string** — Tofu cannot interpolate the backend — so the SeaweedFS container must keep a stable IP (`192.168.8.101`; see the 2026-09-18 postmortem).
+
+Verify (expect a clean/no-op plan when nothing changed):
+
+```bash
+export AWS_ACCESS_KEY_ID="<key>"; export AWS_SECRET_ACCESS_KEY="<secret>"
+cd environments/homelab
+tofu init -reconfigure
+tofu plan
+```
+
+Local `terraform.tfstate*` files are leftovers from the migration and are gitignored; the remote key above is the source of truth.
+
+---
+
+## 16. CI/CD — Forgejo Actions
+
+- **Workflow:** `.forgejo/workflows/tofu.yml` — `plan` on every pull request, `apply` on push to `main`.
+- **Repository:** `forgejo.caprichosdelucia.com/cescm/iac`.
+- **Secrets are repo-level**, at `cescm/iac → Settings → Actions → Secrets` (not organization-level). Create exactly these four:
+
+| Secret | Value / source |
+|--------|----------------|
+| `PROXMOX_VE_USERNAME` | `opentofu@pve` |
+| `PROXMOX_VE_API_TOKEN` | full `USER@REALM!TOKENID=SECRET` (Section 5.1) |
+| `AWS_ACCESS_KEY_ID` | SeaweedFS `terraform` identity (Section 5.2) |
+| `AWS_SECRET_ACCESS_KEY` | SeaweedFS `terraform` identity (Section 5.2) |
+
+> **Known gap (fix pending):** the current workflow injects `PM_API_TOKEN_ID` / `PM_API_TOKEN_SECRET` instead of `PROXMOX_VE_*`, does not provide the required `proxmox_endpoint` variable, and runs `tofu init -backend=false` before `plan`. Each of these breaks the job. See `docs/postmortem-2026-10-13-seaweedfs-tofu-green-plan.md` → *Open issues*; the four secret names above are the contract to converge on.
+
+---
+
+## 17. Windows 11 Guest (`windows11-lab`, VM 102)
+
+Windows 11 needs hardware features a Linux guest does not, so the `proxmox-vm` module exposes them as optional inputs and the `windows11` map entry turns them on.
+
+### Requested specification
+
+| Setting | Value | Module input |
+|---------|-------|--------------|
+| Machine | `q35` | hardcoded |
+| BIOS | OVMF (UEFI) | hardcoded (`bios = "ovmf"`) |
+| TPM | 2.0 | `tpm_enabled = true`, `tpm_version = "v2.0"` |
+| CPU type | `host` | hardcoded |
+| vCPU | 4 (range 2–4) | `cpu_cores = 4` |
+| RAM | 4096 MiB | `memory = 4096` |
+| Ballooning minimum | 2048 MiB | `memory_min = 2048` |
+| Disk | 40 GB (range 32–40) | `disk_size = 40` |
+| Controller | VirtIO SCSI Single | hardcoded (`scsi_hardware = "virtio-scsi-single"`) |
+| Discard | enabled | hardcoded (`discard = "on"`) |
+| IO thread | enabled | hardcoded (`iothread = true`) |
+| Network | VirtIO | hardcoded (`model = "virtio"`) |
+| Guest OS type | `win11` | `os_type = "win11"` |
+| VGA | `std` | `vga_type = "std"` |
+| Install ISO | `HDD01:iso/Win11-Pro-Lite.iso` | `iso = ...` |
+| Boot order | installer first | `boot_order = ["ide2", "scsi0"]` |
+
+Why `vga_type = "std"`: Windows has no virtio-gpu driver during Setup. With the Linux default `virtio` the installer screen stays black. Switch back to `virtio` after the guest driver is installed (optional).
+
+Why `os_type = "win11"`: tells Proxmox/QEMU the guest family so it applies the correct paravirtualisation profile. `l26` would work but is semantically wrong for Windows.
+
+### VirtIO drivers are required to install
+
+The disk controller is VirtIO SCSI (as requested), and Windows Setup ships **no VirtIO driver**. Without the `virtio-win` ISO the installer shows no disk. Before running Setup:
+
+1. Upload `virtio-win.iso` to the `HDD01` datastore.
+2. Add the second CD-ROM to the map entry in `environments/homelab/main.tf`:
+
+   ```hcl
+   iso_secondary = "HDD01:iso/virtio-win.iso"
+   ```
+
+   The module attaches it on `ide0` (the primary installer stays on `ide2`).
+3. `tofu apply`.
+
+> The ISO is **not** uploaded yet, so `iso_secondary` is intentionally omitted from the map entry today. The VM definition is complete for provisioning; only the driver media is pending.
+
+### Post-install steps (manual)
+
+1. In Windows Setup, load the VirtIO **storage** driver from the `virtio-win` CD (`vioscsi`), then the **network** driver (`NetKVM`) after first boot.
+2. Install `virtio-win-guest-tools.exe` from the same CD (installs the QEMU guest agent and remaining drivers).
+3. Shut down the guest.
+4. Remove the installer and driver ISOs from the map entry (`iso`, `iso_secondary`) and set `boot_order = ["scsi0"]`, then `tofu apply`. This mirrors the `omarchy-lab` post-install cleanup.
+5. Optional: enable the guest agent (`qemu_agent = true`) once it is installed, and restore `vga_type = "virtio"`.
+
+### Ansible
+
+The `ansible` repo does **not** manage this guest. Its playbook targets Linux over SSH; a Windows guest needs WinRM and a separate Windows playbook. Until that exists, `windows11-lab` is provisioned by OpenTofu only and configured manually. See `ansible/README.md`.
