@@ -62,14 +62,11 @@ locals {
       os_type     = "win11"
       tpm_enabled = true
       vga_type    = "std"
-      iso         = "HDD01:iso/Win11-Pro-Lite.iso"
-      # Boot the installer CD first; the empty disk is not bootable yet.
-      boot_order = ["ide2", "scsi0"]
-      # The virtio-win driver ISO cannot be a second cdrom (provider limit).
-      # Attach it after apply, before first boot:
-      #   qm set 102 -ide0 HDD01:iso/virtio-win-0.1.302.iso,media=cdrom
-      # Created stopped so the driver ISO can be attached before Setup runs.
-      started = false
+      # iso removed after install: Windows and the virtio-win drivers are
+      # installed, so the installer CD (ide2) is no longer needed.
+      # Boot from the disk only; the VM is started after apply.
+      boot_order = ["scsi0"]
+      started    = true
     }
   }
 }

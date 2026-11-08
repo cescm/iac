@@ -164,7 +164,7 @@ Neither VM needs a boot-order fix after install:
 
 - **`omarchy-lab` (100)**: its ISO booted once from the cdrom on `ide2`; after installation the media was removed (a documented post-install step), so no optical device remains.
 - **`ubuntu-lab` (101)**: its install ISO is still attached on `ide2` (`HDD01:iso/ubuntu-26.04.1-desktop-amd64.iso`) so it can boot the installer on first start.
-- **`windows11-lab` (102)**: boots the Windows 11 installer from `ide2` first (`boot_order = [ide2, scsi0]`) because the empty disk is not bootable yet. See Section 17 for the full Windows lifecycle.
+- **`windows11-lab` (102)**: Windows 11 Pro and the virtio-win drivers are installed. The installer CD was removed after install, so the VM boots from `scsi0` and has no cdrom device. See Section 17 for the full Windows lifecycle.
 
 How the module decides:
 
@@ -398,6 +398,8 @@ Local `terraform.tfstate*` files are leftovers from the migration and are gitign
 
 Windows 11 needs hardware features a Linux guest does not, so the `proxmox-vm` module exposes them as optional inputs and the `windows11` map entry turns them on.
 
+> **Status:** installed. Windows 11 Pro and the virtio-win drivers are on the VM; the installer and driver ISOs were removed, the VM boots from `scsi0` and has no cdrom device. The steps below document how it was built and how to rebuild it.
+
 ### Requested specification
 
 | Setting | Value | Module input |
@@ -449,6 +451,14 @@ The disk controller is VirtIO SCSI (as requested), and Windows Setup ships **no 
 3. Shut down the guest.
 4. Detach the driver ISO (`qm set 102 -delete ide0`) and the installer (`iso` removed from the map entry), set `boot_order = ["scsi0"]`, then `tofu apply`. This mirrors the `omarchy-lab` post-install cleanup.
 5. Optional: enable the guest agent (`qemu_agent = true`) once it is installed, and restore `vga_type = "virtio"`.
+
+> **Gotcha — empty cdrom after removing the ISO.** When the declarative `cdrom` is removed, Proxmox can keep an empty optical drive on `ide3` (`ide3: cdrom,media=cdrom`). QEMU then refuses to start with `The 'host_cdrom' block driver requires a file name`. Delete the leftover device once, then start the VM:
+>
+> ```bash
+> qm set 102 -delete ide3
+> ```
+>
+> This happened on the first install of VM 102; the provider does not re-add it on later applies. See Section 12 troubleshooting.
 
 ### Ansible
 
