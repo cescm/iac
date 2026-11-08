@@ -425,26 +425,29 @@ Why `os_type = "win11"`: tells Proxmox/QEMU the guest family so it applies the c
 
 ### VirtIO drivers are required to install
 
-The disk controller is VirtIO SCSI (as requested), and Windows Setup ships **no VirtIO driver**. Without the `virtio-win` ISO the installer shows no disk. Before running Setup:
+The disk controller is VirtIO SCSI (as requested), and Windows Setup ships **no VirtIO driver** (verified: `boot.wim` contains no `vioscsi`/`viostor`/`netkvm`). Without the `virtio-win` ISO the installer shows no disk.
 
-1. Upload `virtio-win.iso` to the `HDD01` datastore.
-2. Add the second CD-ROM to the map entry in `environments/homelab/main.tf`:
+**Provider limitation:** the legacy `proxmox_virtual_environment_vm` resource allows only **one** `cdrom` block (`MaxItems=1`), and `q35` only exposes `ide0`/`ide2`. So the driver ISO cannot be declared as a second CD-ROM in OpenTofu. The Windows installer ISO is the single declarative `cdrom`; the driver ISO is attached out-of-band:
 
-   ```hcl
-   iso_secondary = "HDD01:iso/virtio-win.iso"
+1. The ISO is already downloaded on the Proxmox host at
+   `/mnt/storage/isos/template/iso/virtio-win.iso` (= `HDD01:iso/virtio-win.iso`).
+   Official source: `https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso`.
+2. After `tofu apply`, attach it to the (stopped) VM before first boot:
+
+   ```bash
+   qm set 102 -ide0 HDD01:iso/virtio-win.iso,media=cdrom
    ```
 
-   The module attaches it on `ide0` (the primary installer stays on `ide2`).
-3. `tofu apply`.
+3. Start the VM and run Setup.
 
-> The ISO is **not** uploaded yet, so `iso_secondary` is intentionally omitted from the map entry today. The VM definition is complete for provisioning; only the driver media is pending.
+> This one line is the only non-declarative step. If you later want it fully in OpenTofu, the alternatives are (a) slipstream the VirtIO drivers into `boot.wim`/`install.wim` of the Windows ISO, or (b) use a SATA disk instead of VirtIO (rejected — VirtIO SCSI was a requirement).
 
 ### Post-install steps (manual)
 
 1. In Windows Setup, load the VirtIO **storage** driver from the `virtio-win` CD (`vioscsi`), then the **network** driver (`NetKVM`) after first boot.
 2. Install `virtio-win-guest-tools.exe` from the same CD (installs the QEMU guest agent and remaining drivers).
 3. Shut down the guest.
-4. Remove the installer and driver ISOs from the map entry (`iso`, `iso_secondary`) and set `boot_order = ["scsi0"]`, then `tofu apply`. This mirrors the `omarchy-lab` post-install cleanup.
+4. Detach the driver ISO (`qm set 102 -delete ide0`) and the installer (`iso` removed from the map entry), set `boot_order = ["scsi0"]`, then `tofu apply`. This mirrors the `omarchy-lab` post-install cleanup.
 5. Optional: enable the guest agent (`qemu_agent = true`) once it is installed, and restore `vga_type = "virtio"`.
 
 ### Ansible

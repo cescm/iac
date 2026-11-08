@@ -117,16 +117,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
     }
   }
 
-  # Secondary install media — typically the virtio-win driver ISO attached to a
-  # Windows guest so Setup can see the VirtIO disk and network adapters. On a
-  # separate IDE interface (ide0) so it coexists with the primary installer.
-  dynamic "cdrom" {
-    for_each = var.iso_secondary != null ? [1] : []
-    content {
-      file_id   = var.iso_secondary
-      interface = "ide0"
-    }
-  }
+  # Secondary install media — NOT supported: the provider allows only one
+  # cdrom block. A virtio-win ISO must be attached out-of-band (README §17).
 
   # --------------------------------------------------
   # Display

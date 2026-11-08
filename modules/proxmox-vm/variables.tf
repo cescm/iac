@@ -85,12 +85,9 @@ variable "tpm_version" {
   default = "v2.0"
 }
 
-# Secondary install media (e.g. the virtio-win driver ISO for Windows guests),
-# attached as a second CD-ROM on ide0. null = no second CD-ROM.
-variable "iso_secondary" {
-  type    = string
-  default = null
-}
+# NOTE: the legacy proxmox_virtual_environment_vm resource allows only ONE
+# cdrom block, so a second ISO (e.g. virtio-win for Windows) cannot be declared
+# here. Attach it out-of-band before first boot (see README section 17).
 
 # VGA adapter type. "virtio" for Linux guests; Windows has no virtio-gpu driver
 # during Setup, so use "std" to keep the installer display visible.

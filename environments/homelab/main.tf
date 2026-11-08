@@ -65,10 +65,9 @@ locals {
       iso         = "HDD01:iso/Win11-Pro-Lite.iso"
       # Boot the installer CD first; the empty disk is not bootable yet.
       boot_order = ["ide2", "scsi0"]
-      # iso_secondary (virtio-win drivers ISO) intentionally omitted: it is not
-      # uploaded to the HDD01 datastore yet. Upload virtio-win.iso and add
-      #   iso_secondary = "HDD01:iso/virtio-win.iso"
-      # before running Setup, otherwise the installer will not see the disk.
+      # The virtio-win driver ISO cannot be a second cdrom (provider limit).
+      # Attach it after apply, before first boot:
+      #   qm set 102 -ide0 HDD01:iso/virtio-win.iso,media=cdrom
     }
   }
 }
@@ -88,11 +87,10 @@ module "vm" {
   memory_min  = try(each.value.memory_min, null)
   disk_size   = each.value.disk_size
   # Windows-specific overrides; Linux entries fall back to the module defaults.
-  os_type       = try(each.value.os_type, "l26")
-  tpm_enabled   = try(each.value.tpm_enabled, false)
-  vga_type      = try(each.value.vga_type, "virtio")
-  boot_order    = try(each.value.boot_order, ["scsi0", "ide2"])
-  iso_secondary = try(each.value.iso_secondary, null)
+  os_type     = try(each.value.os_type, "l26")
+  tpm_enabled = try(each.value.tpm_enabled, false)
+  vga_type    = try(each.value.vga_type, "virtio")
+  boot_order  = try(each.value.boot_order, ["scsi0", "ide2"])
   # try(each.value.iso, null): entries WITHOUT an iso key (e.g. omarchy)
   # evaluate to null, so the module's dynamic "cdrom" block does not render.
   # This keeps the pattern safe for VMs that have no install media attached.

@@ -13,7 +13,7 @@ terraform {
 
   required_providers {
     proxmox = {
-      source  = "bpg/proxmox"
+      source = "bpg/proxmox"
       # Exact pin: avoids surprise breaking changes from minor/patch bumps.
       # The bpg/proxmox provider moves fast; pin until you can test upgrades.
       version = "= 0.111.1"

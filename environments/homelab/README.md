@@ -36,7 +36,7 @@ Concrete OpenTofu values for THIS homelab (three VMs) plus the SeaweedFS remote-
 | `ubuntu-lab` | `ubuntu` | 101 | Install ISO attached on `ide2` |
 | `windows11-lab` | `windows11` | 102 | Windows 11: TPM 2.0, `win11`, VGA `std`, installer on `ide2` |
 
-Windows 11 note: the guest needs the `virtio-win` driver ISO to see the VirtIO disk during Setup. Upload `virtio-win.iso` to `HDD01`, add `iso_secondary = "HDD01:iso/virtio-win.iso"` to the `windows11` entry, and re-apply. Full lifecycle (drivers, post-install cleanup, boot order): [root README §17](../../README.md#17-windows-11-guest-windows11-lab-vm-102).
+Windows 11 note: the guest needs the `virtio-win` driver ISO to see the VirtIO disk during Setup. It is already at `HDD01:iso/virtio-win.iso`; attach it after apply (provider allows only one `cdrom`): `qm set 102 -ide0 HDD01:iso/virtio-win.iso,media=cdrom`. Full lifecycle (drivers, post-install cleanup, boot order): [root README §17](../../README.md#17-windows-11-guest-windows11-lab-vm-102).
 
 All VMs come from one `locals.virtual_machines` map plus a single `for_each` module call in `main.tf`. Deploy one machine with `tofu apply -target='module.vm["omarchy"]'` (see root README §14).
 
